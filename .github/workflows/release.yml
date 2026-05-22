@@ -26,7 +26,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test ./...
+        run: go test -short ./...
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }}

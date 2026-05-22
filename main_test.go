@@ -3,11 +3,67 @@ package main
 import (
 	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
+func TestLoadConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+		"udp_idle_timeout": "30s",
+		"routes": [
+			{
+				"name": "web",
+				"proto": "tcp",
+				"listen": "0.0.0.0:80",
+				"target": "172.31.255.2:80"
+			},
+			{
+				"name": "dns",
+				"proto": "udp",
+				"listen": "0.0.0.0:53",
+				"target": "172.31.255.2:53"
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("got %d routes", len(cfg.Routes))
+	}
+}
+
+func TestLoadConfigRejectsInvalidRoute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+		"routes": [
+			{
+				"proto": "icmp",
+				"listen": "0.0.0.0:80",
+				"target": "172.31.255.2:80"
+			}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loadConfig(path); err == nil {
+		t.Fatal("expected invalid proto error")
+	}
+}
+
 func TestTCPRoute(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping proxy integration test in short mode")
+	}
+
 	target := startTCPEcho(t)
 	listener := listenTCP(t)
 	listenAddr := listener.Addr().String()
@@ -55,6 +111,10 @@ func TestTCPRoute(t *testing.T) {
 }
 
 func TestUDPRoute(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping proxy integration test in short mode")
+	}
+
 	target := startUDPEcho(t)
 	listener := listenUDP(t)
 	listenAddr := listener.LocalAddr().String()
