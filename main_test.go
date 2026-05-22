@@ -18,7 +18,7 @@ func TestLoadConfig(t *testing.T) {
 				"name": "web",
 				"proto": "tcp",
 				"listen": "0.0.0.0:80",
-				"target": "172.31.255.2:80"
+				"target": "http://172.31.255.2:80"
 			},
 			{
 				"name": "dns",
@@ -44,6 +44,9 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if len(cfg.Routes) != 3 {
 		t.Fatalf("got %d routes", len(cfg.Routes))
+	}
+	if cfg.Routes[0].Target != "172.31.255.2:80" {
+		t.Fatalf("got tcp target %q", cfg.Routes[0].Target)
 	}
 }
 

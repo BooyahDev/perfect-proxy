@@ -94,6 +94,22 @@ route instead of a raw TCP route:
 ```json
 {
   "name": "lodge-home",
+  "proto": "tcp",
+  "listen": "0.0.0.0:8123",
+  "target": "172.31.255.2:8123"
+}
+```
+
+For raw TCP and UDP routes, `target` is a network address. Use
+`172.31.255.2:8123`, not `http://172.31.255.2:8123`. URL-style targets are
+accepted for compatibility, but only the host and port are used.
+
+Use an HTTP route only when this process needs to rewrite HTTP headers before
+forwarding to B:
+
+```json
+{
+  "name": "lodge-home-http",
   "proto": "http",
   "listen": "127.0.0.1:8080",
   "target": "http://172.31.255.2:80",

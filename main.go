@@ -83,7 +83,8 @@ func loadConfig(path string) (Config, error) {
 	if len(cfg.Routes) == 0 {
 		return Config{}, errors.New("at least one route is required")
 	}
-	for i, route := range cfg.Routes {
+	for i := range cfg.Routes {
+		route := &cfg.Routes[i]
 		if route.Proto != "tcp" && route.Proto != "udp" && route.Proto != "http" {
 			return Config{}, fmt.Errorf("routes[%d].proto must be tcp, udp, or http", i)
 		}
@@ -92,6 +93,13 @@ func loadConfig(path string) (Config, error) {
 		}
 		if route.Target == "" {
 			return Config{}, fmt.Errorf("routes[%d].target is required", i)
+		}
+		if route.Proto == "tcp" || route.Proto == "udp" {
+			target, err := normalizeNetTarget(route.Target)
+			if err != nil {
+				return Config{}, fmt.Errorf("routes[%d].target must be host:port or URL with host:port: %w", i, err)
+			}
+			route.Target = target
 		}
 		if route.Proto == "http" {
 			target, err := url.Parse(route.Target)
@@ -107,6 +115,22 @@ func loadConfig(path string) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func normalizeNetTarget(target string) (string, error) {
+	if parsed, err := url.Parse(target); err == nil && parsed.Scheme != "" {
+		if parsed.Host == "" {
+			return "", fmt.Errorf("missing host")
+		}
+		if _, _, err := net.SplitHostPort(parsed.Host); err != nil {
+			return "", err
+		}
+		return parsed.Host, nil
+	}
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		return "", err
+	}
+	return target, nil
 }
 
 func runRoute(ctx context.Context, cfg Config, route RouteConfig) error {
