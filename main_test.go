@@ -25,6 +25,13 @@ func TestLoadConfig(t *testing.T) {
 				"proto": "udp",
 				"listen": "0.0.0.0:53",
 				"target": "172.31.255.2:53"
+			},
+			{
+				"name": "web-http",
+				"proto": "http",
+				"listen": "127.0.0.1:8080",
+				"target": "http://172.31.255.2:80",
+				"host_header": "172.31.255.2"
 			}
 		]
 	}`), 0o600); err != nil {
@@ -35,7 +42,7 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Routes) != 2 {
+	if len(cfg.Routes) != 3 {
 		t.Fatalf("got %d routes", len(cfg.Routes))
 	}
 }

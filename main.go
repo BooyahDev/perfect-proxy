@@ -9,6 +9,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -23,10 +26,11 @@ type Config struct {
 }
 
 type RouteConfig struct {
-	Name   string `json:"name"`
-	Proto  string `json:"proto"`
-	Listen string `json:"listen"`
-	Target string `json:"target"`
+	Name       string `json:"name"`
+	Proto      string `json:"proto"`
+	Listen     string `json:"listen"`
+	Target     string `json:"target"`
+	HostHeader string `json:"host_header"`
 }
 
 func main() {
@@ -80,14 +84,26 @@ func loadConfig(path string) (Config, error) {
 		return Config{}, errors.New("at least one route is required")
 	}
 	for i, route := range cfg.Routes {
-		if route.Proto != "tcp" && route.Proto != "udp" {
-			return Config{}, fmt.Errorf("routes[%d].proto must be tcp or udp", i)
+		if route.Proto != "tcp" && route.Proto != "udp" && route.Proto != "http" {
+			return Config{}, fmt.Errorf("routes[%d].proto must be tcp, udp, or http", i)
 		}
 		if route.Listen == "" {
 			return Config{}, fmt.Errorf("routes[%d].listen is required", i)
 		}
 		if route.Target == "" {
 			return Config{}, fmt.Errorf("routes[%d].target is required", i)
+		}
+		if route.Proto == "http" {
+			target, err := url.Parse(route.Target)
+			if err != nil {
+				return Config{}, fmt.Errorf("routes[%d].target must be a valid http URL: %w", i, err)
+			}
+			if target.Scheme != "http" && target.Scheme != "https" {
+				return Config{}, fmt.Errorf("routes[%d].target must use http or https", i)
+			}
+			if target.Host == "" {
+				return Config{}, fmt.Errorf("routes[%d].target must include a host", i)
+			}
 		}
 	}
 	return cfg, nil
@@ -107,8 +123,87 @@ func runRoute(ctx context.Context, cfg Config, route RouteConfig) error {
 			idle = parsed
 		}
 		return runUDP(ctx, route, idle)
+	case "http":
+		return runHTTP(ctx, route)
 	default:
 		return fmt.Errorf("unsupported proto %q", route.Proto)
+	}
+}
+
+func runHTTP(ctx context.Context, route RouteConfig) error {
+	target, err := url.Parse(route.Target)
+	if err != nil {
+		return err
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Director = func(req *http.Request) {
+		originalHost := req.Host
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
+		if target.RawQuery == "" || req.URL.RawQuery == "" {
+			req.URL.RawQuery = target.RawQuery + req.URL.RawQuery
+		} else {
+			req.URL.RawQuery = target.RawQuery + "&" + req.URL.RawQuery
+		}
+
+		if route.HostHeader != "" {
+			req.Host = route.HostHeader
+			req.Header.Set("Host", route.HostHeader)
+		} else {
+			req.Host = target.Host
+			req.Header.Set("Host", target.Host)
+		}
+
+		if req.Header.Get("X-Forwarded-Host") == "" && originalHost != "" {
+			req.Header.Set("X-Forwarded-Host", originalHost)
+		}
+		if req.Header.Get("X-Forwarded-Proto") == "" {
+			req.Header.Set("X-Forwarded-Proto", "http")
+		}
+	}
+	proxy.ErrorLog = log.Default()
+	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
+		log.Printf("http proxy failed %s %s -> %s: %v", routeLabel(route), req.RemoteAddr, route.Target, err)
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}
+
+	server := &http.Server{
+		Addr:    route.Listen,
+		Handler: logHTTP(route, proxy),
+	}
+
+	log.Printf("http route %s listening on %s -> %s", routeLabel(route), route.Listen, route.Target)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return context.Canceled
+}
+
+func logHTTP(route RouteConfig, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		log.Printf("http %s %s %s host=%s -> %s", routeLabel(route), req.Method, req.URL.RequestURI(), req.Host, route.Target)
+		next.ServeHTTP(w, req)
+	})
+}
+
+func singleJoiningSlash(a, b string) string {
+	aslash := len(a) > 0 && a[len(a)-1] == '/'
+	bslash := len(b) > 0 && b[0] == '/'
+	switch {
+	case aslash && bslash:
+		return a + b[1:]
+	case !aslash && !bslash:
+		return a + "/" + b
+	default:
+		return a + b
 	}
 }
 
