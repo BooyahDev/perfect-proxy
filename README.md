@@ -16,6 +16,19 @@ Example topology:
 go build -o perfect-proxy .
 ```
 
+## Release
+
+GitHub Actions runs tests on pushes and pull requests. Pushing a tag like
+`v0.1.0` builds release archives and uploads them to GitHub Releases.
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Release assets include Linux, macOS, Windows, and Raspberry Pi-friendly
+`linux/arm/v6` and `linux/arm/v7` builds.
+
 ## Configure
 
 Create `config.json` from `config.example.json`.
