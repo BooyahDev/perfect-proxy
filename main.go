@@ -26,11 +26,12 @@ type Config struct {
 }
 
 type RouteConfig struct {
-	Name       string `json:"name"`
-	Proto      string `json:"proto"`
-	Listen     string `json:"listen"`
-	Target     string `json:"target"`
-	HostHeader string `json:"host_header"`
+	Name           string `json:"name"`
+	Proto          string `json:"proto"`
+	Listen         string `json:"listen"`
+	Target         string `json:"target"`
+	HostHeader     string `json:"host_header"`
+	ForwardHeaders bool   `json:"forward_headers"`
 }
 
 func main() {
@@ -159,33 +160,7 @@ func runHTTP(ctx context.Context, route RouteConfig) error {
 	if err != nil {
 		return err
 	}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Director = func(req *http.Request) {
-		originalHost := req.Host
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
-		if target.RawQuery == "" || req.URL.RawQuery == "" {
-			req.URL.RawQuery = target.RawQuery + req.URL.RawQuery
-		} else {
-			req.URL.RawQuery = target.RawQuery + "&" + req.URL.RawQuery
-		}
-
-		if route.HostHeader != "" {
-			req.Host = route.HostHeader
-			req.Header.Set("Host", route.HostHeader)
-		} else {
-			req.Host = target.Host
-			req.Header.Set("Host", target.Host)
-		}
-
-		if req.Header.Get("X-Forwarded-Host") == "" && originalHost != "" {
-			req.Header.Set("X-Forwarded-Host", originalHost)
-		}
-		if req.Header.Get("X-Forwarded-Proto") == "" {
-			req.Header.Set("X-Forwarded-Proto", "http")
-		}
-	}
+	proxy := newHTTPProxy(route, target)
 	proxy.ErrorLog = log.Default()
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
 		log.Printf("http proxy failed %s %s -> %s: %v", routeLabel(route), req.RemoteAddr, route.Target, err)
@@ -209,6 +184,51 @@ func runHTTP(ctx context.Context, route RouteConfig) error {
 		return err
 	}
 	return context.Canceled
+}
+
+func newHTTPProxy(route RouteConfig, target *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(req *httputil.ProxyRequest) {
+			rewriteHTTPRequest(req, route, target)
+		},
+	}
+}
+
+func rewriteHTTPRequest(req *httputil.ProxyRequest, route RouteConfig, target *url.URL) {
+	incomingProto := req.In.Header.Get("X-Forwarded-Proto")
+	req.SetURL(target)
+	req.Out.URL.Path = singleJoiningSlash(target.Path, req.In.URL.Path)
+	if target.RawQuery == "" || req.In.URL.RawQuery == "" {
+		req.Out.URL.RawQuery = target.RawQuery + req.In.URL.RawQuery
+	} else {
+		req.Out.URL.RawQuery = target.RawQuery + "&" + req.In.URL.RawQuery
+	}
+
+	if route.HostHeader != "" {
+		req.Out.Host = route.HostHeader
+	} else {
+		req.Out.Host = target.Host
+	}
+
+	if route.ForwardHeaders {
+		req.SetXForwarded()
+		if incomingProto != "" {
+			req.Out.Header.Set("X-Forwarded-Proto", incomingProto)
+		}
+		return
+	}
+
+	stripForwardHeaders(req.Out.Header)
+}
+
+func stripForwardHeaders(header http.Header) {
+	header.Del("Forwarded")
+	header["X-Forwarded-For"] = nil
+	header.Del("X-Forwarded-Host")
+	header.Del("X-Forwarded-Proto")
+	header.Del("X-Forwarded-Server")
+	header.Del("X-Real-IP")
+	header.Del("X-Real-Ip")
 }
 
 func logHTTP(route RouteConfig, next http.Handler) http.Handler {

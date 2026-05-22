@@ -112,14 +112,18 @@ forwarding to B:
   "name": "lodge-home-http",
   "proto": "http",
   "listen": "127.0.0.1:8080",
-  "target": "http://172.31.255.2:80",
-  "host_header": "172.31.255.2"
+  "target": "http://172.31.255.2:8123"
 }
 ```
 
 Then configure the front proxy upstream to `http://127.0.0.1:8080`.
 
-`host_header` is optional. Set it when the B-side HTTP server rejects the
-external host name, for example when aiohttp or the application only accepts
-`172.31.255.2`, `localhost`, or another internal host. Omit it when the
-application expects the public host such as `lodge-home.booyah.dev`.
+By default, HTTP routes strip `Forwarded`, `X-Forwarded-*`, and `X-Real-IP`
+headers so the upstream sees a request similar to a direct request. This is
+useful for services such as Home Assistant unless `trusted_proxies` is
+configured on the upstream.
+
+`host_header` is optional. Set it only when the B-side HTTP server needs a
+specific Host value. `forward_headers` is also optional and defaults to `false`;
+set it to `true` only when the upstream is explicitly configured to trust this
+proxy.

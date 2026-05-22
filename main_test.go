@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"net"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,6 +69,44 @@ func TestLoadConfigRejectsInvalidRoute(t *testing.T) {
 
 	if _, err := loadConfig(path); err == nil {
 		t.Fatal("expected invalid proto error")
+	}
+}
+
+func TestRewriteHTTPRequestStripsForwardHeadersByDefault(t *testing.T) {
+	target, err := url.Parse("http://172.31.255.2:8123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := httptest.NewRequest("GET", "http://10.236.0.60:8123/home?x=1", nil)
+	in.RemoteAddr = "10.0.10.1:12345"
+	in.Header.Set("X-Forwarded-For", "203.0.113.10")
+	in.Header.Set("X-Forwarded-Host", "lodge-home.booyah.dev")
+	in.Header.Set("X-Forwarded-Proto", "https")
+	in.Header.Set("X-Real-IP", "203.0.113.10")
+	out := in.Clone(in.Context())
+
+	rewriteHTTPRequest(&httputil.ProxyRequest{In: in, Out: out}, RouteConfig{
+		Proto:  "http",
+		Target: target.String(),
+	}, target)
+
+	if out.URL.String() != "http://172.31.255.2:8123/home?x=1" {
+		t.Fatalf("got upstream URL %q", out.URL.String())
+	}
+	if out.Host != "172.31.255.2:8123" {
+		t.Fatalf("got host %q", out.Host)
+	}
+	if out.Header.Get("X-Forwarded-Host") != "" {
+		t.Fatalf("got x-forwarded-host %q", out.Header.Get("X-Forwarded-Host"))
+	}
+	if out.Header.Get("X-Forwarded-Proto") != "" {
+		t.Fatalf("got x-forwarded-proto %q", out.Header.Get("X-Forwarded-Proto"))
+	}
+	if out.Header.Get("X-Real-IP") != "" {
+		t.Fatalf("got x-real-ip %q", out.Header.Get("X-Real-IP"))
+	}
+	if forwardedFor, ok := out.Header["X-Forwarded-For"]; ok && forwardedFor != nil {
+		t.Fatalf("got x-forwarded-for %q", forwardedFor)
 	}
 }
 
