@@ -1,0 +1,23 @@
+{
+  "udp_idle_timeout": "2m",
+  "routes": [
+    {
+      "name": "web-to-b",
+      "proto": "tcp",
+      "listen": "0.0.0.0:80",
+      "target": "172.31.255.2:80"
+    },
+    {
+      "name": "https-to-b",
+      "proto": "tcp",
+      "listen": "0.0.0.0:443",
+      "target": "172.31.255.2:443"
+    },
+    {
+      "name": "wireguard-like-udp-example",
+      "proto": "udp",
+      "listen": "0.0.0.0:51820",
+      "target": "172.31.255.2:51820"
+    }
+  ]
+}
